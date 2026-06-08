@@ -1,17 +1,9 @@
-# Phase 4a — IP-only HTTPS with Caddy's internal CA (self-signed).
-# The Player accepts the self-signed cert by skipping TLS verify against
-# this IP (ServiceClient). Swap to `tls user@example.com` + a real domain
-# when ready for Phase 4b.
+# Phase 4a — real hostname via sslip.io wildcard DNS, real Let's Encrypt cert.
+# `143-198-223-46.sslip.io` resolves to 143.198.223.46. ACME HTTP-01
+# challenge requires port 80 reachable from Let's Encrypt servers.
+# Swap to a vanity domain in Phase 4b.
 
-{
-    # TLS clients connecting by IP don't send SNI (SNI is for hostnames),
-    # so Caddy has no hint about which cert to serve. default_sni tells it
-    # to fall back to the cert for this IP for any SNI-less handshake.
-    default_sni 143.198.223.46
-}
-
-143.198.223.46:443 {
-    tls internal
+143-198-223-46.sslip.io {
 
     # /v1/worker/* is internal-only — worker container reaches the service
     # via the compose network on :7777, never through Caddy. Externally
@@ -22,9 +14,5 @@
 
     reverse_proxy service:7777
 }
-
-# Plain HTTP → redirect to HTTPS. Keeps `curl http://...` from looking
-# silently broken.
-:80 {
-    redir https://{host}{uri} permanent
-}
+# Caddy auto-redirects HTTP→HTTPS for hostnames and handles ACME HTTP-01
+# challenges on :80, so no explicit :80 block needed.
