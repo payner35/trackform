@@ -64,6 +64,30 @@ def get_mulan():
         return _mulan
 
 
+def unload_mulan() -> bool:
+    """Drop the resident MuQ-MuLan model and return RAM to the OS.
+
+    Called by `structure` before madmom runs — the parent worker can hold
+    ~3 GB resident from previous tag rounds, and madmom subprocess peaks
+    at ~3.5 GB, so coexistence pushes past the 7 GB cgroup cap on the
+    8 GB control droplet (Phase 4a). Next `get_mulan()` call reloads
+    (~50 s on this hardware).
+
+    @returns True if a model was actually freed, False if nothing was loaded.
+    """
+    global _mulan
+    import gc
+    with _load_lock:
+        if _mulan is None:
+            return False
+        log.info("       unloading MuQ-MuLan to free memory before structure stage")
+        _mulan = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return True
+
+
 def embed_audio(wavs) -> torch.Tensor:
     """Embed a batch of mono 24 kHz audio windows.
 

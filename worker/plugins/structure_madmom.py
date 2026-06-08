@@ -45,6 +45,14 @@ log = logging.getLogger("worker")
 
 @analyzer_stage(name="structure", order=20)
 def structure(ctx: WorkerCtx) -> None:
+    # Free MuQ-MuLan if it's resident from a prior tag round. The madmom
+    # subprocess peaks at ~3.5 GB on long tracks; combined with MuQ's
+    # ~3 GB it blows past the 7 GB cgroup cap on the Phase 4a droplet
+    # and OOM-kills the analyze job. Reload tax is ~50 s on next tag.
+    from plugins.embed_muq_mulan import unload_mulan
+    if unload_mulan():
+        log.info("       (next loop_tag will pay ~50 s to reload MuQ)")
+
     ctx.progress("running_inference", 0.20)
     log.info("       spawning madmom subprocess on %s", ctx.audio_path.name)
 
