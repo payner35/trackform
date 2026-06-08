@@ -39,6 +39,10 @@ services:
       - HF_HOME=/hf-cache
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
+      # /srv shared with service container: service writes loop WAVs to
+      # /srv/audio/loop_*.wav and the worker reads them. Same bind target,
+      # not a separate copy. Mirrors the dev compose's service-db volume.
+      - /var/lib/dlp/db:/srv
       - /var/lib/dlp/hf-cache:/hf-cache
     mem_limit: 4g
     restart: unless-stopped
