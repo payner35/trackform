@@ -1,0 +1,64 @@
+[project]
+name = "dj-loop-worker"
+version = "0.1.0"
+description = "DJ Loop Service — GPU worker (analyzer plugins)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "httpx>=0.27",
+    # core.structure stack.
+    #
+    # Active: madmom (RNNDownBeatProcessor + DBNDownBeatTrackingProcessor).
+    # Globally HMM-decoded beat + downbeat grid — handles disco/house
+    # intros where Beat This!'s minimal postprocessor over-fires. Installed
+    # from git master because PyPI madmom==0.16.1 is broken on Python 3.10+
+    # (`from collections import MutableSequence`); the fix is on `main` but
+    # CPJKU hasn't cut a release in 8 years. See LEARNINGS.md §2.
+    "madmom @ git+https://github.com/CPJKU/madmom.git",
+    # numpy + scipy + cython are madmom's transitive deps; pinned generously.
+    "numpy>=1.24,<2",   # madmom internals use legacy np.float / np.int types
+    "scipy>=1.10",
+    "cython>=0.29",     # madmom builds some modules at install time
+    # Standby: Beat This! (Foscarin et al., ISMIR 2024). Used previously;
+    # kept as a fallback so we can A/B test by toggling plugin.py's loader.
+    # Worker is plugin-driven, swapping is a one-line import change.
+    "beat-this>=1.1",
+    "torch>=2.0",
+    "torchaudio",
+    "soundfile>=0.12",   # backup decoder for files torchaudio can't read
+    # core.key stack — Essentia KeyExtractor with the EDMA profile,
+    # tuned for electronic dance music. ANALYZER_SPEC §2. AGPL-3.0 is
+    # acceptable because the Service is not distributed as a binary.
+    # PyPI ships prebuilt linux_x86_64 wheels; no compile step needed.
+    "essentia>=2.1b6.dev",
+    # core.embed / core.loop_mining stack — MuQ-MuLan (Tencent AI Lab, 2024).
+    # 700M-param music+text joint embedding model. Used for per-loop
+    # embeddings, embedding-consistency loop scoring, and zero-shot
+    # mood/genre tagging via text prompts. 24 kHz input.
+    # Model weights are CC-BY-NC 4.0 — fine for self-hosted, blocker for
+    # paid SaaS. LAION-CLAP `larger_clap_music` (CC-BY-4.0) is the
+    # commercial fallback if/when that matters (ANALYZER_SPEC §2).
+    "muq>=0.1",
+    "librosa>=0.10",
+    # Explicit so uv routes it through the pytorch-cpu index below.
+    # muq → x_clip → torchvision; without this pin uv pulls torchvision
+    # from PyPI default, which is built against a different torch and
+    # fails with `operator torchvision::nms does not exist` at import.
+    "torchvision",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+# Pin torch to CPU wheels — Docker on Mac has no GPU passthrough so CUDA
+# wheels are dead weight (~3 GB). In production on a GPU droplet we'd
+# remove this override and let torch pick the CUDA wheel matching the host.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }

@@ -1,0 +1,24 @@
+# Local-dev override. Compose auto-merges this on top of docker-compose.yml
+# when you run `docker compose up` locally — production deploys ignore it
+# (they only ship the base file).
+#
+# What it does:
+#   - Bind-mounts source code from the host into the running containers
+#     so Python code changes appear immediately. Worker pick-up requires
+#     `docker compose restart worker`; service pick-up via uvicorn --reload.
+#   - No more rebuilds for code-only iteration.
+#
+# Production (DO droplet) builds an immutable image from the base
+# docker-compose.yml — source is COPY'd into the image at build time,
+# not mounted at runtime. See DEPLOYMENT_SPEC §3.1.
+
+services:
+  service:
+    volumes:
+      - ./src/dj_loop_service:/app/src/dj_loop_service:ro
+
+  worker:
+    volumes:
+      - ./worker/main.py:/app/main.py:ro
+      - ./worker/plugin.py:/app/plugin.py:ro
+      - ./worker/plugins:/app/plugins:ro

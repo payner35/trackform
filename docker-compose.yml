@@ -1,0 +1,87 @@
+# DJ Loop Service — runs entirely in its own container.
+#
+# Zero access to the host filesystem. Audio arrives via HTTP upload only
+# (POST /v1/analyze). The Service's library.db lives in a Docker named
+# volume — survives container restarts, deletable independently of the
+# image.
+#
+# Usage:
+#   docker compose build
+#   docker compose up -d
+#   # Player (or curl) uploads audio:
+#   curl -F "file=@/path/to/track.mp3" \
+#        -F "host_path=/Users/me/Music/track.mp3" \
+#        -F "user_id=gavin" \
+#        http://localhost:7777/v1/analyze
+#   # Health check:
+#   curl http://localhost:7777/v1/health
+
+services:
+  service:
+    build: .
+    image: dj-loop-service:dev
+    container_name: dj-loop-service
+    ports:
+      - "7777:7777"
+    volumes:
+      # Named volume — Docker manages it, lives under Docker's data dir, not
+      # in the user's home folder. Inspect with `docker volume inspect`.
+      - service-db:/srv
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["serve", "--db", "/srv/library.db", "--host", "0.0.0.0", "--port", "7777"]
+    restart: unless-stopped
+
+  # GPU worker — the "ephemeral droplet" of DEPLOYMENT_SPEC §3.2 simulated
+  # locally as a sibling container. In production this image is baked into
+  # a DO snapshot and spawned only when the job queue has work. Locally it
+  # stays up alongside the control plane so we can iterate on the contract
+  # without provisioning real GPU droplets. CPU-only on Mac (no GPU
+  # passthrough through Docker Desktop).
+  worker:
+    # Pinned to linux/amd64 because Essentia (core.key) only ships x86_64
+    # wheels — no arm64 build exists upstream. On Apple Silicon this means
+    # the worker runs under qemu emulation (~3× slower inference) for the
+    # benefit of identity with the production droplet, which IS x86_64.
+    # When/if Essentia ships arm64 wheels, drop this line.
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: dj-loop-worker:dev
+    container_name: dj-loop-worker
+    depends_on:
+      - service
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CONTROL_URL=http://service:7777
+      # Drop to 250ms so per-loop tagging feels interactive — the service
+      # /v1/loops/tag handler blocks on a worker job pickup, so slow polling
+      # adds latency per request. Idle cost is negligible (empty SQLite SELECT).
+      - POLL_INTERVAL_SECONDS=0.25
+      # MuQ-MuLan / HuggingFace weights cache. Maps to the hf-cache
+      # named volume below so a Docker rebuild doesn't trigger a fresh
+      # ~3 GB download.
+      - HF_HOME=/hf-cache
+      # HF auth — read token from .env (gitignored). Pure read-only access
+      # for MuQ-MuLan / future model downloads. Without it HF rate-limits
+      # anonymous traffic to ~30 MB/min; with it, full bandwidth.
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      # Share the audio dir so the worker can read uploads written by
+      # /v1/analyze. In production this is replaced by /v1/worker/audio/{job_id}
+      # signed downloads — see DEPLOYMENT_SPEC §4.2.
+      - service-db:/srv
+      - hf-cache:/hf-cache
+    # Memory cap so a runaway stage hits the Docker cgroup limit (visible
+    # in `docker stats` and as State.OOMKilled=true) instead of silently
+    # blowing past the macOS Docker Desktop VM ceiling. 4g covers:
+    # MuQ-MuLan resident (~3 GB) + Essentia / loop_propose overhead.
+    # madmom's heavy DBN decode runs in a subprocess (DEPLOYMENT_SPEC §12)
+    # so it doesn't have to fit in here.
+    mem_limit: 4g
+    restart: unless-stopped
+
+volumes:
+  service-db:
+  hf-cache:

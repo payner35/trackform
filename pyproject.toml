@@ -1,0 +1,40 @@
+[project]
+name = "dj-loop-service"
+version = "0.1.0"
+description = "Analysis and realtime service for DJ Loop Player"
+readme = "README.md"
+authors = [
+    { name = "Gavin Payne", email = "gavinapayne@gmail.com" }
+]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.7",
+    "soundfile>=0.12.1",
+    "numpy>=1.26",
+    "mutagen>=1.47",
+    "pyacoustid>=1.3",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.12",
+    # Heavy ML deps (allin1, librosa, torch, etc.) intentionally NOT in
+    # the control-plane image — they live in the GPU worker image instead.
+    # See DEPLOYMENT_SPEC §9 Phase 3.
+]
+
+[project.scripts]
+service = "dj_loop_service.cli:cli"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
