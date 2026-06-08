@@ -1,0 +1,58 @@
+# Production compose — runs on the DO control droplet.
+#
+# Differences vs. docker-compose.yml (dev):
+#   - Pulls images from GHCR (built by .github/workflows/deploy.yml) rather
+#     than building locally.
+#   - Drops the worker's `platform: linux/amd64` pin — the droplet IS amd64,
+#     no qemu emulation needed.
+#   - SQLite DB and HF model cache bind-mount onto host paths under
+#     /var/lib/dlp/ so they survive container replacement.
+#   - Service binds to 127.0.0.1:7777 — Caddy is the only thing that can
+#     reach it, and Caddy's reverse_proxy uses the compose network anyway.
+#   - Adds a Caddy reverse proxy on :443 with a self-signed cert (Phase 4a,
+#     IP-only; swap for Let's Encrypt once a domain is wired).
+#   - .env on the droplet provides DLP_API_TOKEN and HF_TOKEN.
+
+services:
+  service:
+    image: ghcr.io/payner35/trackform-service:latest
+    container_name: dj-loop-service
+    expose:
+      - "7777"
+    volumes:
+      - /var/lib/dlp/db:/srv
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DLP_API_TOKEN=${DLP_API_TOKEN:?DLP_API_TOKEN must be set in .env}
+    command: ["serve", "--db", "/srv/library.db", "--host", "0.0.0.0", "--port", "7777"]
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/payner35/trackform-worker:latest
+    container_name: dj-loop-worker
+    depends_on:
+      - service
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CONTROL_URL=http://service:7777
+      - POLL_INTERVAL_SECONDS=0.25
+      - HF_HOME=/hf-cache
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - /var/lib/dlp/hf-cache:/hf-cache
+    mem_limit: 4g
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: dj-loop-caddy
+    depends_on:
+      - service
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/lib/dlp/caddy-data:/data
+      - /var/lib/dlp/caddy-config:/config
+    restart: unless-stopped

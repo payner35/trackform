@@ -35,6 +35,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSo
 from fastapi.responses import JSONResponse, Response
 
 from . import jobs
+from .auth import bearer_token_middleware, check_ws_token
 from .config import Config
 from .db import (
     connect,
@@ -52,6 +53,7 @@ app = FastAPI(
     version="0.1.0",
     description="Audio analysis service for DJ Loop Player.",
 )
+app.middleware("http")(bearer_token_middleware)
 
 
 @app.on_event("startup")
@@ -825,13 +827,16 @@ def worker_event(payload: dict[str, Any]) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 @app.websocket("/v1/events")
-async def events(ws: WebSocket) -> None:
+async def events(ws: WebSocket, token: str | None = Query(None)) -> None:
     """Stream analyzer.* (and future playback.*) events to the client.
 
     Schema: REALTIME_SPEC §4. Each frame is one JSON object with at minimum
     `type`, `v`, `ts_ms`. Clients filter by `type` themselves; the server
     has no subscribe-by-type yet.
     """
+    if not check_ws_token(token):
+        await ws.close(code=4401)
+        return
     await ws.accept()
     q = event_bus.subscribe()
     try:

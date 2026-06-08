@@ -1,0 +1,23 @@
+# Phase 4a — IP-only HTTPS with Caddy's internal CA (self-signed).
+# The Player accepts the self-signed cert by skipping TLS verify against
+# this IP (ServiceClient). Swap to `tls user@example.com` + a real domain
+# when ready for Phase 4b.
+
+:443 {
+    tls internal
+
+    # /v1/worker/* is internal-only — worker container reaches the service
+    # via the compose network on :7777, never through Caddy. Externally
+    # these paths 404 so a leaked user token still can't drive the worker
+    # contract (defense in depth before HMAC lands in Phase 4b).
+    @worker path /v1/worker/*
+    respond @worker 404
+
+    reverse_proxy service:7777
+}
+
+# Plain HTTP → redirect to HTTPS. Keeps `curl http://...` from looking
+# silently broken.
+:80 {
+    redir https://{host}{uri} permanent
+}
