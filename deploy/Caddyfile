@@ -3,7 +3,7 @@
 # this IP (ServiceClient). Swap to `tls user@example.com` + a real domain
 # when ready for Phase 4b.
 
-:443 {
+143.198.223.46:443 {
     tls internal
 
     # /v1/worker/* is internal-only — worker container reaches the service
