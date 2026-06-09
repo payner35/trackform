@@ -36,6 +36,7 @@ import json
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from plugin import WorkerCtx, analyzer_stage
@@ -57,27 +58,49 @@ def structure(ctx: WorkerCtx) -> None:
     log.info("       spawning madmom subprocess on %s", ctx.audio_path.name)
 
     # Per-stage subprocess. Memory returns to the OS on exit — see module
-    # docstring. Timeout is generous to cover long extended mixes on Mac
-    # dev where qemu emulation is ~3× slower than native.
-    # In the worker container `run_madmom_subprocess.py` sits flat under
-    # /app/ alongside main.py (not as a package). Invoke by path.
-    try:
-        proc = subprocess.run(
-            [sys.executable, "/app/run_madmom_subprocess.py",
-             str(ctx.audio_path)],
-            capture_output=True,
-            timeout=15 * 60,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        log.error("madmom subprocess timed out after 15 min on %s",
-                  ctx.audio_path.name)
-        raise RuntimeError("madmom subprocess timed out") from None
+    # docstring. We use Popen + poll (rather than subprocess.run) so the
+    # parent worker can emit progress heartbeats every few seconds while
+    # madmom is doing its silent ~60-90 s inference. Without heartbeats
+    # the Player's progress bar sits frozen at 20% the whole time and the
+    # UI looks dead. Frac is linearly interpolated from 0.20 -> 0.65 over
+    # an estimated 75 s; if madmom finishes earlier we jump straight to
+    # 0.70 below, if it takes longer the bar holds at 0.65 while the
+    # elapsed-time counter keeps ticking. The 15-min hard timeout still
+    # applies — we just enforce it manually now.
+    HEARTBEAT_SEC = 3.0
+    EST_INFERENCE_SEC = 75.0
+    HARD_TIMEOUT_SEC = 15 * 60
+
+    proc = subprocess.Popen(
+        [sys.executable, "/app/run_madmom_subprocess.py",
+         str(ctx.audio_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    start = time.monotonic()
+    last_beat = start
+    while proc.poll() is None:
+        now = time.monotonic()
+        if now - start > HARD_TIMEOUT_SEC:
+            proc.kill()
+            proc.wait(timeout=5)
+            log.error("madmom subprocess timed out after %.0f s on %s",
+                      HARD_TIMEOUT_SEC, ctx.audio_path.name)
+            raise RuntimeError("madmom subprocess timed out")
+        if now - last_beat >= HEARTBEAT_SEC:
+            elapsed = now - start
+            # 0.20 -> 0.65 linear over EST_INFERENCE_SEC, capped at 0.65.
+            frac = 0.20 + min(elapsed / EST_INFERENCE_SEC, 1.0) * 0.45
+            ctx.progress("running_inference", frac)
+            last_beat = now
+        time.sleep(0.25)
+
+    stdout, stderr = proc.communicate()
 
     # Forward subprocess stderr (its own log lines) into our log so the
     # full picture stays in one place.
-    if proc.stderr:
-        for line in proc.stderr.decode("utf-8", errors="replace").splitlines():
+    if stderr:
+        for line in stderr.decode("utf-8", errors="replace").splitlines():
             if line.strip():
                 log.info("       %s", line)
 
