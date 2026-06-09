@@ -131,8 +131,14 @@ def loop_propose(ctx: WorkerCtx) -> None:
             seg_hi = min(seg_hi, variety_end)
             if seg_hi <= seg_lo:
                 continue
-            # argmax in this segment, but skip anything already picked as buildup
-            candidates = [i for i in range(seg_lo, seg_hi) if i not in buildup_idx and i not in variety_idx]
+            # argmax in this segment, enforcing MIN_GAP_DOWNBEATS to every
+            # already-picked window (build-up OR variety). Without the gap
+            # check two 8-bar loops can land 4 bars apart and visually
+            # overlap on the waveform — see "loops overlap" 2026-06-09.
+            already = buildup_idx + variety_idx
+            candidates = [i for i in range(seg_lo, seg_hi)
+                          if all(abs(i - chosen) >= MIN_GAP_DOWNBEATS
+                                 for chosen in already)]
             if not candidates:
                 continue
             best = max(candidates, key=lambda i: energy[i])
