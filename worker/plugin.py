@@ -95,8 +95,8 @@ def load_builtin_plugins() -> None:
     #
     # Active:  madmom (RNN + DBN — global HMM decode, handles EDM intros)
     # Standby: structure_beat_this — keep on disk for A/B comparison
-    # from plugins import structure_madmom      # noqa: F401  — standby (slower, tighter bar phase on disco/sparse intros)
-    from plugins import structure_beat_this    # noqa: F401  — active for A/B speed test (6-9x faster on CPU)
+    from plugins import structure_madmom        # noqa: F401  — active (tighter bar phase via DBN HMM decode, +30s vs Beat This!)
+    # from plugins import structure_beat_this  # noqa: F401  — standby (faster but less reliable downbeats on sparse intros)
 
     # core.key — Essentia EDMA musical key + Camelot wheel.
     from plugins import key_essentia  # noqa: F401
