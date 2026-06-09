@@ -44,7 +44,7 @@ services:
       # not a separate copy. Mirrors the dev compose's service-db volume.
       - /var/lib/dlp/db:/srv
       - /var/lib/dlp/hf-cache:/hf-cache
-    mem_limit: 7g
+    mem_limit: 7500m
     restart: unless-stopped
 
   caddy:

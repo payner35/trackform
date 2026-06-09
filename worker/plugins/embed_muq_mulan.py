@@ -69,13 +69,20 @@ def unload_mulan() -> bool:
 
     Called by `structure` before madmom runs — the parent worker can hold
     ~3 GB resident from previous tag rounds, and madmom subprocess peaks
-    at ~3.5 GB, so coexistence pushes past the 7 GB cgroup cap on the
-    8 GB control droplet (Phase 4a). Next `get_mulan()` call reloads
-    (~50 s on this hardware).
+    at ~3.5 GB, so coexistence pushes past the cgroup cap on the 8 GB
+    control droplet (Phase 4a). Next `get_mulan()` call reloads (~50 s
+    on this hardware).
+
+    PyTorch's CPU caching allocator does not return freed memory to the
+    OS via `gc.collect()` alone — the bytes go back to the pool, not to
+    the kernel. We `malloc_trim(0)` to force glibc to release fully-free
+    pages. Without this the parent worker RSS stays elevated after the
+    "unload" and madmom can OOM regardless.
 
     @returns True if a model was actually freed, False if nothing was loaded.
     """
     global _mulan
+    import ctypes
     import gc
     with _load_lock:
         if _mulan is None:
@@ -85,6 +92,12 @@ def unload_mulan() -> bool:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+            log.info("       malloc_trim'd glibc heap back to OS")
+        except OSError as e:
+            log.warning("       malloc_trim unavailable on this system: %s", e)
         return True
 
 
